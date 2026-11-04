@@ -152,7 +152,6 @@ class CogInventory {
   load(save) {
     this.availableSlotKeys = [];
     this._score = null;
-    console.log("Loading");
 
     let foo = [];
     foo[1] = "Beginner"; // White
@@ -180,7 +179,6 @@ class CogInventory {
         const classNameSlot = `CharacterClass_${i}`;
         const classNameIndex = save[classNameSlot];
         const className = foo[classNameIndex];
-        console.log(v, classNameIndex, className);
 
         if (classNameIndex >= 31) {
           // Mage

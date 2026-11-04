@@ -7,80 +7,16 @@
 
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
 
-    <link rel="stylesheet" href="style.css?v=dev25" />
-    <script type="text/javascript" src="Solver.js?v=dev25"></script>
-    <script type="text/javascript" src="CogInventory.js?v=dev25"></script>
-    <script type="text/javascript" src="BoardRenderer.js?v=dev25"></script>
-    <script type="text/javascript" src="PlayerRenderer.js?v=dev25"></script>
-    <script type="text/javascript" src="Paginator.js?v=dev25"></script>
+    <link rel="stylesheet" href="style.css" />
+    <script type="text/javascript" src="Solver.js"></script>
+    <script type="text/javascript" src="CogInventory.js"></script>
+    <script type="text/javascript" src="BoardRenderer.js"></script>
+    <script type="text/javascript" src="PlayerRenderer.js"></script>
+    <script type="text/javascript" src="Paginator.js"></script>
     
     <title>Cogtimizer</title>
   </head>
   <body>
-    <div id="devconsole">
-      <div id="devconsole-bar">
-        <span id="devconsole-title">console</span>
-        <span id="devconsole-actions">
-          <button id="devconsole-clear" type="button">clear</button>
-          <button id="devconsole-toggle" type="button">hide</button>
-        </span>
-      </div>
-      <div id="devconsole-body"></div>
-    </div>
-    <script type="text/javascript">
-      // Lightweight on-page terminal that mirrors console output, so logs are
-      // visible without opening browser DevTools.
-      (function () {
-        const body = document.getElementById("devconsole-body");
-        const panel = document.getElementById("devconsole");
-
-        function fmt(arg) {
-          if (typeof arg === "string") return arg;
-          try {
-            return JSON.stringify(arg);
-          } catch (e) {
-            return String(arg);
-          }
-        }
-
-        const MAX_LINES = 200;
-        function write(level, args) {
-          if (!body) return;
-          const line = document.createElement("div");
-          line.className = "devconsole-line devconsole-" + level;
-          const time = new Date().toLocaleTimeString();
-          line.textContent =
-            "[" + time + "] " + Array.prototype.map.call(args, fmt).join(" ");
-          body.appendChild(line);
-          // Cap the panel so its DOM can't grow unbounded and slow the page.
-          while (body.childNodes.length > MAX_LINES) {
-            body.removeChild(body.firstChild);
-          }
-          body.scrollTop = body.scrollHeight;
-        }
-
-        ["log", "info", "warn", "error", "debug"].forEach(function (level) {
-          const original = console[level] ? console[level].bind(console) : function () {};
-          console[level] = function () {
-            original.apply(null, arguments);
-            write(level, arguments);
-          };
-        });
-
-        window.addEventListener("error", function (ev) {
-          write("error", [ev.message + " @ " + ev.filename + ":" + ev.lineno]);
-        });
-
-        document.getElementById("devconsole-clear").addEventListener("click", function () {
-          body.innerHTML = "";
-        });
-        const toggle = document.getElementById("devconsole-toggle");
-        toggle.addEventListener("click", function () {
-          const collapsed = panel.classList.toggle("collapsed");
-          toggle.textContent = collapsed ? "show" : "hide";
-        });
-      })();
-    </script>
     <div class="menucontainer">
       <ul class="menu">
         <li id="loaderbtn" class="active"><div><div><div>Loader</div></div></div></li>
@@ -285,18 +221,6 @@
           settingsPage.style.height = borderElem.offsetHeight + "px";
         }
       })
-      
-      f.verifyBoardIntegrity = (board) => {
-        for (let y = 0; y < board.length; y++) {
-          for (let x = 0; x < board[y].length; x++) {
-            if (board[y][x].blocked) continue;
-            const tempPos = board[y][x].position();
-            if (tempPos.x !== x || tempPos.y !== y) {
-              debugger;
-            }
-          }
-        }
-      }
       
       f.printBoard = (board, renderer = window.boardRenderer) => {
         for (let i = 0; i < board.length; i++) {
@@ -653,7 +577,6 @@
 
       function load(save) {
         cogInvetory.load(save);
-        console.log("Loading");
         // Fetch Gem-Shop flaggy upgrades
         document.getElementById("flaggyShop").value = cogInvetory.flaggyShopUpgrades;
         sparePage.goto(0);
@@ -686,7 +609,6 @@
       }
       
       function fetchAndLoadConfig(username) {
-        console.log("Trying to fetch", username);
         if (username.length > 0) {
           const headers = {
             "Content-Type": "text/json",
@@ -697,8 +619,8 @@
             return response.json();
           }).then((json) => {
             load(json);
-          }).catch((reason) => {
-            console.log(reason);
+          }).catch(() => {
+            /* ignore: invalid username or network/CORS error */
           });
         }
       }
@@ -721,8 +643,6 @@
         document.getElementById("solvetext").innerText = "Optimizing...";
         let lastYield = Date.now();
         await yield(); // Yield for DOM-Refresh
-
-        console.log("Starting");
 
         let start = cogInvetory.clone();
 

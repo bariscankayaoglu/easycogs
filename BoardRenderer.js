@@ -91,7 +91,6 @@ class BoardRenderer {
     const isVisible = (slot.row >= this._pageIndex * this._visibleRows && 
       slot.row < this._pageIndex * this._visibleRows + this._visibleRows);
 
-    // console.log(slot.row, slot.column, isVisible);
     if (!isVisible) {
       return;
     }

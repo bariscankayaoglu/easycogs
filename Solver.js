@@ -35,7 +35,6 @@ class Solver {
       // No flaggs placed means no use for flaggy rate
       this.weights.flaggy = 0;
     }
-    console.log("Solving with goal:", this.weights);
     let lastYield = Date.now();
     let state = inventory.clone();
     const solutions = [state];
@@ -44,7 +43,6 @@ class Solver {
     let counter = 0;
     let currentScore = this.getScoreSum(state.score);
 
-    console.log("Trying to optimize");
     while(Date.now() - startTime < solveTime) {
       if(Date.now() - lastYield > 100) {
         // Prevent UI from freezing with very high solve times
@@ -74,13 +72,10 @@ class Solver {
         state.move(slotKey, cogKey);
       }
     }
-    console.log(`Tried ${counter} switches`);
     const scores = solutions.map((s)=>this.getScoreSum(s.score));
-    console.log(`Made ${solutions.length} different attempts with final scores: ${scores}`);
     const bestIndex = scores.indexOf(scores.reduce((a,b)=>Math.max(a,b)));
     let best = solutions[bestIndex];
     if (g.best === null || this.getScoreSum(g.best.score) < scores[bestIndex]) {
-      console.log("Best solution was number", bestIndex);
       g.best = best;
     } else {
       best = g.best;
@@ -120,8 +115,6 @@ class Solver {
         && changed.expBonus === goal.expBonus
         && changed.expBoost === goal.expBoost
         && changed.flagBoost === goal.flagBoost) {
-        console.log(`Removed useless move ${cog1Key} to ${cog2Key}`);
-
         continue;
       }
       inventory.move(cog1Key, cog2Key);

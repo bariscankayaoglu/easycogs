@@ -30,7 +30,6 @@ class PlayerRenderer {
 
         const headCanvas = document.createElement("canvas");
         head.addEventListener("load", (ev) => {
-            console.log("Head loaded");
             headCanvas.width = head.width;
             headCanvas.height = head.height;
         });
@@ -51,7 +50,6 @@ class PlayerRenderer {
     }
 
     _colorHead(pr, pg, pb) {
-        console.log("color head");
         const ctx = this._head.context;
         ctx.clearRect(0, 0, this._head.width, this._head.height);
         let headW = parseInt(this._headImg.width);
