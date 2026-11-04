@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+
+    <link rel="stylesheet" href="style.css?v=dev25" />
+    <script type="text/javascript" src="Solver.js?v=dev25"></script>
+    <script type="text/javascript" src="CogInventory.js?v=dev25"></script>
+    <script type="text/javascript" src="BoardRenderer.js?v=dev25"></script>
+    <script type="text/javascript" src="PlayerRenderer.js?v=dev25"></script>
+    <script type="text/javascript" src="Paginator.js?v=dev25"></script>
+    
+    <title>Cogtimizer</title>
+  </head>
+  <body>
+    <div id="devconsole">
+      <div id="devconsole-bar">
+        <span id="devconsole-title">console</span>
+        <span id="devconsole-actions">
+          <button id="devconsole-clear" type="button">clear</button>
+          <button id="devconsole-toggle" type="button">hide</button>
+        </span>
+      </div>
+      <div id="devconsole-body"></div>
+    </div>
+    <script type="text/javascript">
+      // Lightweight on-page terminal that mirrors console output, so logs are
+      // visible without opening browser DevTools.
+      (function () {
+        const body = document.getElementById("devconsole-body");
+        const panel = document.getElementById("devconsole");
+
+        function fmt(arg) {
+          if (typeof arg === "string") return arg;
+          try {
+            return JSON.stringify(arg);
+          } catch (e) {
+            return String(arg);
+          }
+        }
+
+        const MAX_LINES = 200;
+        function write(level, args) {
+          if (!body) return;
+          const line = document.createElement("div");
+          line.className = "devconsole-line devconsole-" + level;
+          const time = new Date().toLocaleTimeString();
+          line.textContent =
+            "[" + time + "] " + Array.prototype.map.call(args, fmt).join(" ");
+          body.appendChild(line);
+          // Cap the panel so its DOM can't grow unbounded and slow the page.
+          while (body.childNodes.length > MAX_LINES) {
+            body.removeChild(body.firstChild);
+          }
+          body.scrollTop = body.scrollHeight;
+        }
+
+        ["log", "info", "warn", "error", "debug"].forEach(function (level) {
+          const original = console[level] ? console[level].bind(console) : function () {};
+          console[level] = function () {
+            original.apply(null, arguments);
+            write(level, arguments);
+          };
+        });
+
+        window.addEventListener("error", function (ev) {
+          write("error", [ev.message + " @ " + ev.filename + ":" + ev.lineno]);
+        });
+
+        document.getElementById("devconsole-clear").addEventListener("click", function () {
+          body.innerHTML = "";
+        });
+        const toggle = document.getElementById("devconsole-toggle");
+        toggle.addEventListener("click", function () {
+          const collapsed = panel.classList.toggle("collapsed");
+          toggle.textContent = collapsed ? "show" : "hide";
+        });
+      })();
+    </script>
+    <div class="menucontainer">
+      <ul class="menu">
+        <li id="loaderbtn" class="active"><div><div><div>Loader</div></div></div></li>
+        <li id="cogbtn"><div><div><div>Cogs</div></div></div></li>
+      </ul>
+      <div class="options">
+        <button id="settingsbtn">
+          <div></div>
+          <div>
+            Settings
+            <div class="checkbox"></div>
+          </div>
+          <div></div>
+        </button>
+        <button id="solve" >
+          <div></div>
+          <div id="solvetext">Solve</div>
+          <div></div>
+        </button>
+      </div>
+      <div class="spacer"></div>
+      <div class="crow"></div>
+    </div>
+    <div class="content">
+      <div id="loader">
+      <div class="inputarea">
+        <div>Enter config json or username</div>
+        <textarea type="textarea" id="input" rows="10" cols="100"></textarea>
+        <div>
+          <button id="load" style="max-width: 15ch;">Load</button>
+        </div>
+      </div>
+    </div>
+      <div id="result">
+        <div id="notify">
+          <span>Please</span>
+          <span>load</span>
+          <span>a</span>
+          <span>savegame</span>
+        </div>
+
+        <!-- CURRENT unit: user's in-game layout -->
+        <div class="unit" id="currentUnit">
+          <div class="boardtitle">Optimized</div>
+          <div class="unitrow">
+            <div class="info">
+              <div id="spare">---Placeholder---</div>
+              <div id="sparepage"></div>
+              <div class="stats">
+                <span class="buildrate">
+                  <h3>Total Build Rate</h3>
+                  <p id="buildrate">N/A</p>
+                </span>
+                <span class="xpbonus">
+                  <h3>Player XP Bonus</h3>
+                  <p id="xpbonus">N/A</p>
+                </span>
+                <span class="flaggyrate">
+                  <h3>Flaggy Rate</h3>
+                  <p id="flaggyrate">N/A</p>
+                </span>
+              </div>
+            </div>
+            <div id="currentBoard"></div>
+          </div>
+        </div>
+
+        <div class="unitdivider"></div>
+
+        <!-- Right unit: the user's CURRENT in-game layout -->
+        <div class="unit" id="finalUnit">
+          <div class="boardtitle">Current</div>
+          <div class="unitrow">
+            <div class="info">
+              <div id="finalspare"></div>
+              <div id="finalsparepage"></div>
+              <div class="stats">
+                <span class="buildrate">
+                  <h3>Total Build Rate</h3>
+                  <p id="buildrate2">N/A</p>
+                </span>
+                <span class="xpbonus">
+                  <h3>Player XP Bonus</h3>
+                  <p id="xpbonus2">N/A</p>
+                </span>
+                <span class="flaggyrate">
+                  <h3>Flaggy Rate</h3>
+                  <p id="flaggyrate2">N/A</p>
+                </span>
+              </div>
+            </div>
+            <div id="finalBoard"></div>
+          </div>
+        </div>
+
+        <div class="border" id="border"></div>
+        <div id="settings" style="display: none;">
+          <p>
+            <label for="flaggyShop">Gem Shop Flaggy upgrades</label><br />
+            <input type="number" id="flaggyShop" value="0" style="width:6ch" disabled=true></input>
+          </p>
+          <p>
+            <label for="buildRate">Build rate score weight</label><br />
+            <input type="number" id="buildRate" value="2" style="width:6ch"></input>
+          </p>
+          <p>
+            <label for="expBonus">EXP Bonus score weight</label><br />
+            <input type="number" id="expBonus" value="50" style="width:6ch"></input>
+          </p>
+          <p>
+            <label for="flaggy">Flaggy rate score weight</label><br />
+            <input type="number" id="flaggy" value="5" style="width:6ch"></input>
+          </p>
+          <p>
+            <label for="solveTime">Solve times (ms)</label><br />
+            <input type="number" id="solveTime" value="2500" style="width:10ch"></input>
+          </p>
+        </div>
+      </div>
+    </div>
+    <p id="start"></p>
+    <p id="end"></p>
+    <script type="text/javascript">
+      const player = new PlayerRenderer();
+      window.player = player;
+
+      const ROWS = 8;
+      const COLUMNS = 12;
+      const OPTIMIZABLE = ["buildRate", "expBonus", "flaggy"];
+      
+      const getInput = (id) => Number.parseInt(document.getElementById(id).value);
+      const getFlaggyShop = getInput.bind(null, "flaggyShop");
+
+      const createElem = function createElem(tagName, style=undefined) {
+        const elem = document.createElement(tagName);
+        if (style) {
+          elem.style = style;
+        }
+        return elem;
+      }
+      
+      window.g = {
+        cogs: {},
+        board: [],
+        best: null,
+        frameState: {}, // cog initialKey -> "green" | "red" | "blue"
+        labelMap: null
+      };
+      window.f = {};
+
+      window.boardRenderer = new BoardRenderer(ROWS, COLUMNS, "board");
+      window.finalRenderer = new BoardRenderer(ROWS, COLUMNS, "final");
+      window.spareRenderer = new BoardRenderer(40, 3, "spare", 5);
+      window.finalSpareRenderer = new BoardRenderer(40, 3, "finalspare", 5);
+      window.solver = new Solver();
+      window.cogInvetory = new CogInventory();
+
+      window.sparePage = new Paginator("sparepage", window.spareRenderer._pageCount, 1);
+      window.sparePage.addEventListener("change", (ev) => {
+        window.spareRenderer.showPage(ev.page);
+        if (f.onSparePageChange) f.onSparePageChange();
+      });
+
+      window.finalSparePage = new Paginator("finalsparepage", window.finalSpareRenderer._pageCount, 1);
+      window.finalSparePage.addEventListener("change", (ev) => {
+        window.finalSpareRenderer.showPage(ev.page);
+        if (f.onSparePageChange) f.onSparePageChange();
+      });
+
+      const boardElem = document.getElementById("currentBoard");
+      boardElem.innerHTML = "";
+      boardElem.appendChild(window.boardRenderer.createHTMLElement());
+
+      const finalBoardElem = document.getElementById("finalBoard");
+      finalBoardElem.appendChild(window.finalRenderer.createHTMLElement());
+
+      const spareElem = document.getElementById("spare");
+      const spareParent = spareElem.parentNode;
+      spareParent.insertBefore(window.spareRenderer.createHTMLElement(), spareElem);
+      spareParent.removeChild(spareElem);
+
+      const finalSpareElem = document.getElementById("finalspare");
+      const finalSpareParent = finalSpareElem.parentNode;
+      finalSpareParent.insertBefore(window.finalSpareRenderer.createHTMLElement(), finalSpareElem);
+      finalSpareParent.removeChild(finalSpareElem);
+
+      const settingsBtn = document.getElementById("settingsbtn");
+      const slider = settingsBtn.childNodes[3].childNodes[1];
+      const settingsPage = document.getElementById("settings");
+      const borderElem = document.getElementById("border");
+      settingsBtn.addEventListener("click", () => {
+        const active = slider.classList.contains("active");
+        if (active) {
+          slider.classList.remove("active");
+          settingsPage.style.display = "none";
+        } else {
+          openCogTab();
+
+          slider.classList.add("active");
+          settingsPage.style.display = "";
+          settingsPage.style.left = borderElem.offsetLeft + "px";
+          settingsPage.style.height = borderElem.offsetHeight + "px";
+        }
+      })
+      
+      f.verifyBoardIntegrity = (board) => {
+        for (let y = 0; y < board.length; y++) {
+          for (let x = 0; x < board[y].length; x++) {
+            if (board[y][x].blocked) continue;
+            const tempPos = board[y][x].position();
+            if (tempPos.x !== x || tempPos.y !== y) {
+              debugger;
+            }
+          }
+        }
+      }
+      
+      f.printBoard = (board, renderer = window.boardRenderer) => {
+        for (let i = 0; i < board.length; i++) {
+          for (let j = 0; j < board[i].length; j++) {
+            renderer.set(i, j, board[i][j]);
+          }
+        }
+      }
+      
+      function yield() {
+        return new Promise(r=>setTimeout(r,1));
+      }
+      
+      // Re-render the spare (left) inventory panel from an inventory's cogs so
+      // that the final layout's numbered cogs show up in the correct spare slots.
+      f.printSpare = (inventory, renderer = window.spareRenderer) => {
+        const spareStart = 108; // keys 0-95 board, 96-107 build, 108+ spare
+        for (let i = 0; i < 40 * 3; i++) {
+          const row = Math.floor(i / 3);
+          const col = i % 3;
+          const key = spareStart + i;
+          renderer.set(row, col, inventory.cogs[key]);
+        }
+      }
+
+      // ----- Move hints -----------------------------------------------------
+      // Left board = current layout, right board = optimized layout. Clicking a
+      // tile on the left draws a green arrow to that cog's destination tile on
+      // the right (both framed green). Click again -> origin turns red (done),
+      // arrow removed. Click a third time -> cleared.
+      const BOARD_COLUMNS = 12;
+      const MH_SPARE_START = 108;
+      const SPARE_PER_ROW = 3;
+      const SPARE_VISIBLE_ROWS = 5;
+
+      // A cog's key encodes its surface: 0-95 board, 96-107 build, 108+ spare.
+      // Resolve a key on a given side ("current" | "final") to the renderer,
+      // the spare page it lives on (-1 if not spare), and its row/col in that
+      // renderer's grid.
+      function mhResolve(side, key) {
+        const isCurrent = side === "current";
+        if (key >= MH_SPARE_START) {
+          const idx = key - MH_SPARE_START;
+          return {
+            renderer: isCurrent ? window.spareRenderer : window.finalSpareRenderer,
+            paginator: isCurrent ? window.sparePage : window.finalSparePage,
+            page: Math.floor(Math.floor(idx / SPARE_PER_ROW) / SPARE_VISIBLE_ROWS),
+            row: Math.floor(idx / SPARE_PER_ROW),
+            col: idx % SPARE_PER_ROW,
+            surface: "spare"
+          };
+        }
+        if (key >= 96) {
+          // build tray: not shown as a separate surface here
+          return null;
+        }
+        return {
+          renderer: isCurrent ? window.boardRenderer : window.finalRenderer,
+          paginator: null,
+          page: 0,
+          row: Math.floor(key / BOARD_COLUMNS),
+          col: key % BOARD_COLUMNS,
+          surface: "board"
+        };
+      }
+
+      function mhTileElem(loc) {
+        if (!loc) return null;
+        const slot = loc.renderer.get(loc.row, loc.col);
+        return slot ? slot.elem : null;
+      }
+
+      const moveHints = {
+        partnerByKey: {},     // optimized key (left) -> current/origin key (right)
+        optKeyByPartner: {},  // current/origin key (identity) -> optimized key
+        activeId: null,       // cog identity (initialKey) currently active + arrow
+        suppressPageClear: false, // true during the arrow's own page flips
+        svg: null
+      };
+
+      function mhEnsureSvg() {
+        if (moveHints.svg) return moveHints.svg;
+        const NS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(NS, "svg");
+        svg.setAttribute("id", "movearrow");
+        const defs = document.createElementNS(NS, "defs");
+        const marker = document.createElementNS(NS, "marker");
+        marker.setAttribute("id", "movearrow-head");
+        marker.setAttribute("viewBox", "0 0 10 10");
+        marker.setAttribute("refX", "8");
+        marker.setAttribute("refY", "5");
+        marker.setAttribute("markerWidth", "6");
+        marker.setAttribute("markerHeight", "6");
+        marker.setAttribute("orient", "auto-start-reverse");
+        const mPath = document.createElementNS(NS, "path");
+        mPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+        mPath.setAttribute("fill", "#1bff00");
+        marker.appendChild(mPath);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+        const line = document.createElementNS(NS, "line");
+        line.setAttribute("id", "movearrow-line");
+        line.setAttribute("stroke", "#1bff00");
+        line.setAttribute("stroke-width", "3");
+        line.setAttribute("marker-end", "url(#movearrow-head)");
+        svg.appendChild(line);
+        document.body.appendChild(svg);
+        moveHints.svg = svg;
+        return svg;
+      }
+
+      function mhHideArrow() {
+        if (moveHints.svg) moveHints.svg.style.display = "none";
+      }
+
+      // Draw the arrow pointing from the CURRENT/original tile (right) to the
+      // OPTIMIZED tile (left): "bring this cog from here to there."
+      // originKey = clicked optimized tile (left), partnerKey = current (right).
+      // The arrowhead sits at the optimized (left) end, so left is the line's
+      // x2/y2 endpoint and right is x1/y1.
+      function mhDrawArrow(originKey, partnerKey) {
+        const to = mhResolve("current", originKey);    // left (optimized) = arrowhead
+        const from = mhResolve("final", partnerKey);   // right (current) = tail
+        if (!from || !to) { mhHideArrow(); return; }
+
+        // Flip spare pages so both endpoints are visible (click time only).
+        // Suppress the page-change clear so our own flip doesn't cancel us.
+        moveHints.suppressPageClear = true;
+        if (from.paginator && from.paginator.pageIndex !== from.page) {
+          from.paginator.goto(from.page);
+        }
+        if (to.paginator && to.paginator.pageIndex !== to.page) {
+          to.paginator.goto(to.page);
+        }
+        moveHints.suppressPageClear = false;
+        mhPositionArrow(originKey, partnerKey);
+      }
+
+      // Geometry only: reposition the arrow line between the two tiles' current
+      // on-screen rects. Does NOT flip pages or repaint (used on scroll/resize).
+      function mhPositionArrow(originKey, partnerKey) {
+        const to = mhResolve("current", originKey);
+        const from = mhResolve("final", partnerKey);
+        if (!from || !to) { mhHideArrow(); return; }
+        const fromEl = mhTileElem(from);
+        const toEl = mhTileElem(to);
+        if (!fromEl || !toEl) { mhHideArrow(); return; }
+
+        const svg = mhEnsureSvg();
+        const a = fromEl.getBoundingClientRect();
+        const b = toEl.getBoundingClientRect();
+        const sx = window.scrollX, sy = window.scrollY;
+
+        svg.style.display = "block";
+        svg.style.position = "absolute";
+        svg.style.left = "0";
+        svg.style.top = "0";
+        svg.style.width = document.documentElement.scrollWidth + "px";
+        svg.style.height = document.documentElement.scrollHeight + "px";
+
+        const line = document.getElementById("movearrow-line");
+        line.setAttribute("x1", a.left + a.width / 2 + sx);
+        line.setAttribute("y1", a.top + a.height / 2 + sy);
+        line.setAttribute("x2", b.left + b.width / 2 + sx);
+        line.setAttribute("y2", b.top + b.height / 2 + sy);
+      }
+
+      // Redraw visible frames on all four surfaces. The renderers read
+      // window.g.frameState (keyed by cog initialKey) in _renderFrame, so
+      // re-rendering the visible page makes frames follow their cogs.
+      f.repaintFrames = () => {
+        window.boardRenderer.showPage(window.boardRenderer._pageIndex);
+        window.finalRenderer.showPage(window.finalRenderer._pageIndex);
+        window.spareRenderer.showPage(window.spareRenderer._pageIndex);
+        window.finalSpareRenderer.showPage(window.finalSpareRenderer._pageIndex);
+      };
+
+      // Called whenever a spare paginator changes. A USER page change cancels
+      // the active green selection + arrow (it only makes sense while both
+      // endpoints are visible). A programmatic flip done by the arrow itself is
+      // suppressed so it doesn't cancel the arrow it just drew. Red/blue marks
+      // are identity-based and always repaint correctly.
+      f.onSparePageChange = () => {
+        if (!moveHints.suppressPageClear && moveHints.activeId !== null) {
+          const id = moveHints.activeId;
+          if (window.g.frameState[id] !== "red") {
+            delete window.g.frameState[id];
+          }
+          moveHints.activeId = null;
+          mhHideArrow();
+        }
+        f.repaintFrames();
+      };
+
+      // The frame STATE lives on the cog identity (initialKey) in
+      // window.g.frameState, not on DOM cells. Cycle per cog:
+      //   none -> active(green if it moves / blue if it stays) -> red -> none
+      // Only one "active" cog at a time (it also owns the arrow); red marks
+      // persist independently.
+      function mhCycle(clickedKey) {
+        // clickedKey is an OPTIMIZED (left) position. The cog's identity is its
+        // original key (== partner). partner===clickedKey means it stays put.
+        const partner = moveHints.partnerByKey[clickedKey];
+        if (partner === undefined) return;
+        const id = partner;                 // cog identity = original key
+        const moves = partner !== clickedKey;
+        const fs = window.g.frameState;
+        const current = fs[id];
+
+        if (current === "green" || current === "blue") {
+          // active -> red (done); drop the arrow if this was the active cog.
+          fs[id] = "red";
+          if (moveHints.activeId === id) {
+            moveHints.activeId = null;
+            mhHideArrow();
+          }
+          f.repaintFrames();
+          return;
+        }
+        if (current === "red") {
+          // red -> cleared
+          delete fs[id];
+          f.repaintFrames();
+          return;
+        }
+
+        // cleared -> active. Clear any other active (non-red) cog first.
+        if (moveHints.activeId !== null && moveHints.activeId !== id) {
+          if (fs[moveHints.activeId] !== "red") delete fs[moveHints.activeId];
+          mhHideArrow();
+        }
+        fs[id] = moves ? "green" : "blue";
+        moveHints.activeId = id;
+
+        if (moves) {
+          mhDrawArrow(clickedKey, partner); // flips pages (repaints) then draws
+        } else {
+          mhHideArrow();
+        }
+        f.repaintFrames();
+      }
+
+      function mhReset() {
+        window.g.frameState = {};
+        moveHints.activeId = null;
+        mhHideArrow();
+        if (window.boardRenderer) f.repaintFrames();
+      }
+      f.resetMoveHints = mhReset;
+
+      // Given a clicked <td>, detect whether it belongs to the Current board
+      // or Current spare table, and return its origin key (or null).
+      function mhKeyFromTd(td) {
+        const table = td.closest("table.cogboard");
+        if (!table) return null;
+        const tr = td.parentElement;
+        const rowIdx = Array.prototype.indexOf.call(table.rows, tr);
+        const colIdx = Array.prototype.indexOf.call(tr.children, td);
+        if (rowIdx < 0 || colIdx < 0) return null;
+
+        // Which Current-side table was clicked?
+        const boardTable = document.querySelector("#currentBoard table.cogboard");
+        const spareTable = document.querySelector("#currentUnit .info table.cogboard");
+
+        if (table === boardTable) {
+          return rowIdx * BOARD_COLUMNS + colIdx;
+        }
+        if (table === spareTable) {
+          const page = window.spareRenderer._pageIndex;
+          const absRow = page * SPARE_VISIBLE_ROWS + rowIdx;
+          return MH_SPARE_START + absRow * SPARE_PER_ROW + colIdx;
+        }
+        return null;
+      }
+
+      // Build origin->destination map from final inventory and wire clicks on
+      // the Current side (board + spare).
+      f.setupMoveHints = (startInv, bestInv) => {
+        mhReset();
+        moveHints.partnerByKey = {};
+        moveHints.optKeyByPartner = {};
+        for (const cog of Object.values(bestInv.cogs)) {
+          if (cog && cog.initialKey !== undefined) {
+            // You click the OPTIMIZED position (cog.key, left) and we point to
+            // where that cog currently sits (cog.initialKey, right).
+            moveHints.partnerByKey[cog.key] = cog.initialKey;
+            moveHints.optKeyByPartner[cog.initialKey] = cog.key;
+          }
+        }
+
+        const unitEl = document.getElementById("currentUnit");
+        if (unitEl && !unitEl._mhWired) {
+          unitEl.addEventListener("click", (ev) => {
+            const td = ev.target.closest("td");
+            if (!td) return;
+            const key = mhKeyFromTd(td);
+            if (key === null || !(key in moveHints.partnerByKey)) return;
+            mhCycle(key);
+          });
+          unitEl._mhWired = true;
+        }
+
+        if (!window._mhArrowSync) {
+          let rafPending = false;
+          const resync = () => {
+            if (rafPending) return;
+            rafPending = true;
+            requestAnimationFrame(() => {
+              rafPending = false;
+              const id = moveHints.activeId;
+              if (id === null || window.g.frameState[id] !== "green") return;
+              const optKey = moveHints.optKeyByPartner[id];
+              if (optKey !== undefined && optKey !== id) {
+                // Reposition the arrow without re-flipping pages/repainting.
+                mhPositionArrow(optKey, id);
+              }
+            });
+          };
+          window.addEventListener("resize", resync);
+          window.addEventListener("scroll", resync, true);
+          window._mhArrowSync = true;
+        }
+      }
+
+      function mmoifyNumber(num, addSign = true) {
+        let str = num;
+
+        if (Math.abs(num) >= 1000000) {
+          str = (Math.ceil(num / 10000) / 100) + "M";
+        } else if (Math.abs(num) >= 1000) {
+          str = (Math.ceil(num / 10) / 100) + "K";
+        }
+
+        if (addSign && num >= 0) {
+          str = "+" + str;
+        }
+
+        return str.toString();
+      }
+
+      // Write the three stat values (absolute) into one unit's stat block.
+      function setStats(suffix, score) {
+        document.getElementById("buildrate" + suffix).innerText = mmoifyNumber(score.buildRate, false) + "/HR";
+        document.getElementById("xpbonus" + suffix).innerText = mmoifyNumber(score.expBonus, false) + "%";
+        document.getElementById("flaggyrate" + suffix).innerText = mmoifyNumber(score.flaggy, false) + "/HR";
+      }
+
+      // Show/hide the right (Current) unit + divider. Before solving we only
+      // show a single board; the second board appears after Solve.
+      function setTwoBoardView(show) {
+        document.getElementById("finalUnit").style.display = show ? "" : "none";
+        document.querySelector(".unitdivider").style.display = show ? "" : "none";
+      }
+
+      function load(save) {
+        cogInvetory.load(save);
+        console.log("Loading");
+        // Fetch Gem-Shop flaggy upgrades
+        document.getElementById("flaggyShop").value = cogInvetory.flaggyShopUpgrades;
+        sparePage.goto(0);
+        finalSparePage.goto(0);
+
+        const initScore = cogInvetory.score;
+
+        // Clear any previous solve result first.
+        if (f.resetMoveHints) f.resetMoveHints();
+
+        // Single board before solving: show the current layout on the left,
+        // hide the second (Current) unit until a solve runs.
+        setTwoBoardView(false);
+        document.querySelector("#currentUnit .boardtitle").innerText = "Current";
+        f.printSpare(cogInvetory, window.spareRenderer);
+        f.printBoard(cogInvetory.board, window.boardRenderer);
+
+        document.getElementById("solve").disabled = "";
+        setStats("", initScore);   // left (single) board shows current values
+        
+        for (let oneOption of [...OPTIMIZABLE, "solveTime"]) {
+          const val = localStorage.getItem(oneOption);
+          if (val) {
+            document.getElementById(oneOption).value = val;
+          }
+        }
+        
+
+        openCogTab();
+      }
+      
+      function fetchAndLoadConfig(username) {
+        console.log("Trying to fetch", username);
+        if (username.length > 0) {
+          const headers = {
+            "Content-Type": "text/json",
+            method: "GET"
+          };
+          fetch(`https://cdn.idleonefficiency.com/profiles/${username.toLowerCase()}.json`, headers)
+          .then((response) => {
+            return response.json();
+          }).then((json) => {
+            load(json);
+          }).catch((reason) => {
+            console.log(reason);
+          });
+        }
+      }
+
+      document.getElementById("load").addEventListener("click", () => {
+        const input = document.getElementById("input").value;
+        try {
+          const save = JSON.parse(input);
+          load(save);
+        } catch (e) {
+          if (e instanceof SyntaxError) {
+            fetchAndLoadConfig(input);
+          }
+        }
+      });
+      
+      document.getElementById("solve").onclick = async () => {
+        const solveTime = getInput("solveTime") || 2500;
+        localStorage.setItem("solveTime", solveTime);
+        document.getElementById("solvetext").innerText = "Optimizing...";
+        let lastYield = Date.now();
+        await yield(); // Yield for DOM-Refresh
+
+        console.log("Starting");
+
+        let start = cogInvetory.clone();
+
+        document.getElementById("start").innerText = `Starting BuildRate: ${start.score.buildRate}, EXP: ${start.score.expBonus}, Flaggy: ${start.score.flaggy}`;
+        const [buildRate, expBonus, flaggy] = [getInput("buildRate"), getInput("expBonus"), getInput("flaggy")];
+        localStorage.setItem("buildRate", buildRate);
+        localStorage.setItem("expBonus", expBonus);
+        localStorage.setItem("flaggy", flaggy);
+        solver.setWeights(getInput("buildRate"), getInput("expBonus"), getInput("flaggy"));
+        const best = await solver.solve(cogInvetory, solveTime);
+        document.getElementById("end").innerText = `Final BuildRate: ${best.score.buildRate}, EXP: ${best.score.expBonus}, Flaggy: ${best.score.flaggy}`;
+
+        // Current unit = absolute current values; Optimized unit = absolute
+        // Reveal the two-board view: LEFT = OPTIMIZED (goal), RIGHT = CURRENT.
+        setTwoBoardView(true);
+        document.querySelector("#currentUnit .boardtitle").innerText = "Optimized";
+
+        // LEFT unit (boardRenderer/spareRenderer, stats "") = OPTIMIZED (goal).
+        // RIGHT unit (finalRenderer/finalSpareRenderer, stats "2") = CURRENT.
+        setStats("", best.score);
+        setStats("2", start.score);
+
+        sparePage.goto(0);
+        finalSparePage.goto(0);
+        f.printSpare(best, window.spareRenderer);        // left = optimized
+        f.printSpare(start, window.finalSpareRenderer);  // right = current
+        f.printBoard(best.board, window.boardRenderer);  // left = optimized
+        f.printBoard(start.board, window.finalRenderer); // right = current
+
+        f.setupMoveHints(start, best);
+
+        document.getElementById("solvetext").innerText = "Solve";
+        openCogTab();
+      };
+    
+      function openCogTab() {
+        document.getElementById("loader").style.display = "none";
+        document.getElementById("result").style.display = "inherit";
+
+        document.getElementById("loaderbtn").className = "";
+        document.getElementById("cogbtn").className = "active";
+      }
+
+      function openLoaderTab() {
+        document.getElementById("loader").style.display = "inherit";
+        document.getElementById("result").style.display = "none";
+
+        document.getElementById("loaderbtn").className = "active";
+        document.getElementById("cogbtn").className = "";
+      }
+
+      document.getElementById("loaderbtn").addEventListener("click", () => {
+        openLoaderTab();
+      });
+      document.getElementById("cogbtn").addEventListener("click", () => {
+        openCogTab();
+      });
+    </script>
+  </body>
+</html>
