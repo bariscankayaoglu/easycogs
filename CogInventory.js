@@ -34,6 +34,20 @@ const YIN_MAP = {
   ["A02"]: "Yin_Bottom_Left_Cog",
   ["A03"]: "Yin_Bottom_Right_Cog"
 };
+// Crystal (gem) cogs CogCry0..CogCry5, in game order.
+const CRYSTAL_ICON_MAP = {
+  [0]: "Topaz_Cog",
+  [1]: "Ruby_Cog",
+  [2]: "Amethyst_Cog",
+  [3]: "Garnet_Cog",
+  [4]: "Emerald_Cog",
+  [5]: "Bluegem_Cog"
+};
+// Placeholder art used when a cog code is recognized as a real cog but we have
+// no dedicated icon for it (e.g. newer Idleon cog types). Keeps the board
+// rendering instead of 404ing or crashing the load.
+const UNKNOWN_COG_ICON = "assets/cpu.png";
+const BLANK_COG_ICON = "assets/cog_blank.png";
 const INV_ROWS = 8;
 const INV_COLUMNS = 12;
 const SPARE_START = 108;
@@ -45,6 +59,7 @@ class Cog {
     this.initialKey = initialValues.initialKey !== undefined ? initialValues.initialKey : initialValues.key;
     this.buildRate = initialValues.buildRate;
     this.isPlayer = initialValues.isPlayer;
+    this.isTiny = initialValues.isTiny;
     this.isFlag = initialValues.isFlag;
     this.expGain = initialValues.expGain;
     this.flaggy = initialValues.flaggy;
@@ -57,6 +72,12 @@ class Cog {
     this.nothing = initialValues.nothing; // Description: +% Nothing! LOL
     this.fixed = initialValues.fixed;
     this.blocked = initialValues.blocked;
+    // Yin / Excogia: quadrant identity and the per-quadrant board-wide boost
+    // values, used to compute the Excogia bonus live from formation.
+    this.isYin = initialValues.isYin;
+    this.yinQuadrant = initialValues.yinQuadrant;
+    this.yinBuildBoost = initialValues.yinBuildBoost;
+    this.yinExpBoost = initialValues.yinExpBoost;
     this._position = null;
   }
   get key() {
@@ -128,6 +149,10 @@ class CogInventory {
     this.flagPose = [];
     this.flaggyShopUpgrades = 0;
     this.availableSlotKeys = [];
+    // Whether this account has unlocked the tiny-cog (mini) board, and which
+    // spare-region slot keys are the active tiny-cog slots. Set in load().
+    this.tinyBoardUnlocked = false;
+    this.tinyBoardSlotKeys = [];
     this._score = null;
     // Saved for performance
     this._board = new FakeBoard(this);
@@ -233,31 +258,20 @@ class CogInventory {
     this.flaggyShopUpgrades = JSON.parse(save["GemItemsPurchased"])[118];
     // Fetch the list of available cogs
     const cogRaw = JSON.parse(save["CogM"]);
-    const cogIcons = JSON.parse(save["CogO"]).map(c=>{
-      let icon = {
-        type: "cog"
-      };
-      if(c === "Blank") {
-        icon.type = "blank";
-        icon.path = "assets/cog_blank.png"
-      } else if(c.startsWith("Player")) {
-        icon = hatIcons[c.substring(7)] || { type: "head", path: "icons/head.png" };
-      } else if(c === "CogY") {
-        icon.type = "cog";
-        icon.path = "icons/cogs/Yang_Cog.png";
-      } else {
-        icon.type = "cog";
-        const parsed=c.match(/^Cog([0123YZ])(.{2,3})$/);
-        if(parsed[1] === "Z") {
-          icon.path = "icons/cogs/" + YIN_MAP[parsed[2]] + ".png";
-        } else {
-          icon.path = "icons/cogs/" + ICON_TYPE_MAP[parsed[2]] + "_" + ICON_QUALITY_MAP[parsed[1]] + ".png";
-        }
-      }
-      return icon;
-    });
+    const cogCodes = JSON.parse(save["CogO"]);
+    const cogIcons = cogCodes.map(c => CogInventory._decodeIcon(c, hatIcons));
     const cogArray = Object.entries(cogRaw).map(([key, c]) => {
       const keyNum = Number.parseInt(key);
+      const code = cogCodes[keyNum];
+      // Yin quadrant: "A00" (top-left), "A01" (top-right), "A02" (bottom-left),
+      // "A03" (bottom-right). The game bakes boostRadius "everything" onto these
+      // tiles ONLY while the 4 are in formation. We must NOT trust that static
+      // flag once the solver can move tiles, so for Yin cogs we strip the
+      // generic boostRadius and instead compute the board-wide bonus live from
+      // the formation (see score()). The per-quadrant boost values (e/f) are
+      // kept on yinBuildBoost / yinExpBoost for that live calculation.
+      const yinMatch = typeof code === "string" ? code.match(/^CogZ(A0[0-3])$/) : null;
+      const isYin = !!yinMatch;
       return new Cog({
         key: keyNum,
         icon: cogIcons[keyNum] || "Blank",
@@ -266,23 +280,42 @@ class CogInventory {
         expGain: c.b,
         flaggy: c.c,
         expBonus: c.d,
-        buildRadiusBoost: c.e,
-        expRadiusBoost: c.f,
+        buildRadiusBoost: isYin ? undefined : c.e,
+        expRadiusBoost: isYin ? undefined : c.f,
         flaggyRadiusBoost: c.g,
-        boostRadius: c.h,
+        boostRadius: isYin ? undefined : c.h,
         flagBoost: c.j,
         nothing: c.k,
-        fixed: c.h === "everything",
-        blocked: false
+        // Yin quadrants are movable (the solver should be free to keep/form the
+        // Excogia). Only non-Yin "everything" cogs stay fixed.
+        fixed: !isYin && c.h === "everything",
+        blocked: false,
+        isYin: isYin,
+        yinQuadrant: isYin ? yinMatch[1] : undefined,
+        yinBuildBoost: isYin ? c.e : undefined,
+        yinExpBoost: isYin ? c.f : undefined
       });
     });
     // Get the available board
     this.flagPose = JSON.parse(save["FlagP"]).filter(v=>v>=0); // Only first 4 are used
-    const slots = JSON.parse(save["FlagU"]).map((n, i) => {
+    const flagU = JSON.parse(save["FlagU"]);
+    const slots = flagU.map((n, i) => {
       if (n > 0 && this.flagPose.includes(i)) return new Cog({ key: i, fixed: true, blocked: true, isFlag: true, icon: "Blank" });
       if (n !== -11) return new Cog({ key: i, fixed: true, blocked: true });
       return new Cog({ key: i, icon: "Blank" });
     });
+    // Detect the tiny-cog (mini) board. Its slots live beyond the main board +
+    // build region (key >= SPARE_START). The tiny board only exists in the
+    // matrix once unlocked: an account without it has FlagU === 0 for the whole
+    // spare region (see example2), while an account with it has active slots
+    // there (FlagU === -11 for a usable tiny slot, or a non-zero "special"
+    // value for a tiny slot currently being unlocked via a flag). So any
+    // spare-region slot with FlagU !== 0 marks the tiny board as present.
+    this.tinyBoardSlotKeys = [];
+    for (let i = SPARE_START; i < flagU.length; i++) {
+      if (flagU[i] !== 0) this.tinyBoardSlotKeys.push(i);
+    }
+    this.tinyBoardUnlocked = this.tinyBoardSlotKeys.length > 0;
     // Map slots and cogs to a key -> obj map
     this.slots = {};
     for (const slot of slots) {
@@ -296,11 +329,75 @@ class CogInventory {
       this.cogs[cog.key] = cog;
     }
 
+    // Tiny cogs (CogSm*) are intentionally NOT instantiated as cog objects.
+    // They live on the separate tiny board (left/right columns), which we do
+    // not draw or optimize yet, and the data cannot reliably tell an unlocked
+    // tiny slot from a locked one. Leaving them out keeps the optimizer valid
+    // (it can never move a tiny cog onto the main board) and the main board is
+    // unaffected since tiny cogs carry no CogM stats.
+
     this._assignLabels();
 
     document.getElementById("notify").style.display = "none";
   }
   
+  // Decode a single CogO entry into a renderable icon. This is intentionally
+  // fault-tolerant: unknown or newer cog codes (e.g. Crystal "CogCry*" or the
+  // "CogSm*" shelf family) resolve to a placeholder instead of throwing, so a
+  // single unrecognized code can never abort the whole load. hatIcons maps a
+  // player name -> its resolved hat/head icon (built earlier in load()).
+  static _decodeIcon(c, hatIcons = {}) {
+    if (typeof c !== "string" || c === "Blank") {
+      return { type: "blank", path: BLANK_COG_ICON };
+    }
+    if (c.startsWith("Player")) {
+      return hatIcons[c.substring(7)] || { type: "head", path: "icons/head.png" };
+    }
+    if (c === "CogY") {
+      return { type: "cog", path: "icons/cogs/Yang_Cog.png" };
+    }
+
+    // Crystal cogs: CogCry0..CogCry5 map to the gem icons in game order.
+    const cry = c.match(/^CogCry(\d+)$/);
+    if (cry) {
+      const name = CRYSTAL_ICON_MAP[Number.parseInt(cry[1])];
+      if (name) return { type: "cog", path: "icons/cogs/" + name + ".png" };
+      return { type: "cog", path: UNKNOWN_COG_ICON };
+    }
+
+    // Tiny cogs (tiny-board cog type). Metal is encoded by the family letter:
+    //   CogSmb* -> gold   (TG)
+    //   CogSma* -> silver (TS)
+    //   CogSm_* -> bronze (TB)
+    // Shown as text until dedicated art exists.
+    if (c.startsWith("CogSm")) {
+      if (c.startsWith("CogSmb")) return { type: "cog", text: "TG", tiny: true, metal: "gold" };
+      if (c.startsWith("CogSma")) return { type: "cog", text: "TS", tiny: true, metal: "silver" };
+      return { type: "cog", text: "TB", tiny: true, metal: "bronze" };
+    }
+
+    // Classic format: Cog<quality><type>, e.g. Cog0di, Cog3ro, CogZA00.
+    const parsed = c.match(/^Cog([0123YZ])(.{2,3})$/);
+    if (parsed) {
+      const quality = parsed[1];
+      const type = parsed[2];
+      if (quality === "Z") {
+        const name = YIN_MAP[type];
+        if (name) return { type: "cog", path: "icons/cogs/" + name + ".png" };
+      } else {
+        const typeName = ICON_TYPE_MAP[type];
+        const qualityName = ICON_QUALITY_MAP[quality];
+        if (typeName && qualityName) {
+          return { type: "cog", path: "icons/cogs/" + typeName + "_" + qualityName + ".png" };
+        }
+      }
+    }
+
+    // Anything else (new/unknown cog types) still renders as a real cog using a
+    // generic placeholder so it participates in moves and numbering normally.
+    return { type: "cog", path: UNKNOWN_COG_ICON };
+  }
+
   // A "real" movable cog is one with an actual icon (not a blank/empty slot)
   // and not a blocked/fixed board tile. These are the items that can be moved
   // around and therefore need a stable identifier.
@@ -361,7 +458,44 @@ class CogInventory {
   get board() {
     return this._board;
   }
-  
+
+  // Scan the live board for complete Excogia formations: a 2x2 block of Yin
+  // quadrants placed in their correct corners -- A00 top-left, A01 top-right,
+  // A02 bottom-left, A03 bottom-right. Returns the total board-wide boost
+  // (summed per quadrant, matching the game: 4 x 1.25% -> 5% build, etc.) that
+  // should be applied to every board tile. Scattered Yin cogs contribute 0.
+  _excogiaBoost() {
+    // Index Yin cogs by their current board position for O(1) corner lookup.
+    const byPos = {}; // "row,col" -> cog
+    for (const key of this.availableSlotKeys) {
+      const cog = this.get(key);
+      if (cog && cog.isYin) {
+        const p = cog.position();
+        if (p.location === "board") byPos[p.y + "," + p.x] = cog;
+      }
+    }
+    let build = 0, exp = 0, count = 0;
+    for (const posKey of Object.keys(byPos)) {
+      const tl = byPos[posKey];
+      if (tl.yinQuadrant !== "A00") continue; // anchor on the top-left quadrant
+      const [r, c] = posKey.split(",").map(Number);
+      const tr = byPos[r + "," + (c + 1)];
+      const bl = byPos[(r + 1) + "," + c];
+      const br = byPos[(r + 1) + "," + (c + 1)];
+      if (tr && tr.yinQuadrant === "A01" &&
+          bl && bl.yinQuadrant === "A02" &&
+          br && br.yinQuadrant === "A03") {
+        // Complete, correctly-oriented 2x2 Excogia. Sum each quadrant's boost.
+        for (const q of [tl, tr, bl, br]) {
+          build += q.yinBuildBoost || 0;
+          exp += q.yinExpBoost || 0;
+          count++;
+        }
+      }
+    }
+    return { build, exp, formed: count > 0 };
+  }
+
   get score() {
     if (this._score !== null) return this._score;
 
@@ -437,6 +571,19 @@ class CogInventory {
         bonus.flagBoost += entry.flagBoost         || 0;
       }
     }
+
+    // Excogia: a complete 2x2 Yin formation grants a board-wide build/exp boost.
+    // Computed live from the current layout so the solver is rewarded for
+    // keeping/forming it and penalized for breaking it. Applied to every tile.
+    const excogia = this._excogiaBoost();
+    if (excogia.formed) {
+      for (let i = 0; i < INV_ROWS; i++) {
+        for (let j = 0; j < INV_COLUMNS; j++) {
+          bonusGrid[i][j].buildRate += excogia.build;
+          bonusGrid[i][j].expBoost += excogia.exp;
+        }
+      }
+    }
  
     // Bonus grid done, now we can sum everything up
     for (let key of this.availableSlotKeys) {
@@ -487,5 +634,85 @@ class CogInventory {
 		} else {
 			this.cogs[pos1].key = pos1;
 		}
+  }
+
+  // ---- Excogia (2x2 Yin block) movement -------------------------------------
+  // The 4 Yin quadrants only grant their board-wide bonus in a correct 2x2.
+  // Random 1x1 swaps can never assemble that, so the solver instead keeps them
+  // locked as a block and relocates the whole block. These helpers support
+  // that: find the block, enumerate valid destinations, and move it atomically.
+
+  // Board key of the Excogia's top-left (A00) cell when the 4 quadrants form a
+  // correct 2x2; otherwise null. Only considers the board region (keys 0-95).
+  excogiaAnchor() {
+    const byPos = {};
+    for (const key of Object.keys(this.cogs)) {
+      const cog = this.cogs[key];
+      if (!cog || !cog.isYin) continue;
+      const p = cog.position();
+      if (p.location === "board") byPos[p.y + "," + p.x] = cog;
+    }
+    for (const posKey of Object.keys(byPos)) {
+      const tl = byPos[posKey];
+      if (tl.yinQuadrant !== "A00") continue;
+      const [r, c] = posKey.split(",").map(Number);
+      const tr = byPos[r + "," + (c + 1)];
+      const bl = byPos[(r + 1) + "," + c];
+      const br = byPos[(r + 1) + "," + (c + 1)];
+      if (tr && tr.yinQuadrant === "A01" && bl && bl.yinQuadrant === "A02" &&
+          br && br.yinQuadrant === "A03") {
+        return r * INV_COLUMNS + c;
+      }
+    }
+    return null;
+  }
+
+  // Is the 2x2 whose top-left is board (r,c) fully on the board and all 4 cells
+  // usable (unlocked, not blocked/fixed)? Used to pick valid block destinations.
+  _is2x2Usable(r, c) {
+    if (r < 0 || c < 0 || r + 1 >= INV_ROWS || c + 1 >= INV_COLUMNS) return false;
+    for (const [rr, cc] of [[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]]) {
+      const key = rr * INV_COLUMNS + cc;
+      const slot = this.slots[key];
+      // availableSlotKeys are the unlocked, non-fixed board/spare slots.
+      if (!slot || slot.fixed || slot.blocked) return false;
+      // The occupant must be a normal movable cog (not a flag/blocked/build).
+      const occ = this.cogs[key];
+      if (occ && (occ.fixed || occ.blocked)) return false;
+    }
+    return true;
+  }
+
+  // All valid 2x2 top-left board keys the Excogia could be placed at.
+  validExcogiaAnchors() {
+    const res = [];
+    for (let r = 0; r + 1 < INV_ROWS; r++) {
+      for (let c = 0; c + 1 < INV_COLUMNS; c++) {
+        if (this._is2x2Usable(r, c)) res.push(r * INV_COLUMNS + c);
+      }
+    }
+    return res;
+  }
+
+  // Move the Excogia block (currently anchored at srcTopLeftKey) to the 2x2
+  // anchored at destTopLeftKey, swapping the 4 cogs there into the source 2x2.
+  // Both anchors are board top-left keys. Keeps the quadrants' relative layout.
+  moveExcogia(srcTopLeftKey, destTopLeftKey) {
+    if (srcTopLeftKey === destTopLeftKey) return;
+    this._score = null;
+    const offs = [0, 1, INV_COLUMNS, INV_COLUMNS + 1]; // TL, TR, BL, BR
+    // Snapshot the 4 source (Yin) and 4 dest cogs first.
+    const srcCogs = offs.map(o => this.cogs[srcTopLeftKey + o]);
+    const dstCogs = offs.map(o => this.cogs[destTopLeftKey + o]);
+    for (let i = 0; i < 4; i++) {
+      const srcKey = srcTopLeftKey + offs[i];
+      const dstKey = destTopLeftKey + offs[i];
+      // Yin quadrant -> dest cell
+      if (srcCogs[i]) { this.cogs[dstKey] = srcCogs[i]; this.cogs[dstKey].key = dstKey; }
+      else delete this.cogs[dstKey];
+      // Displaced cog -> src cell
+      if (dstCogs[i]) { this.cogs[srcKey] = dstCogs[i]; this.cogs[srcKey].key = srcKey; }
+      else delete this.cogs[srcKey];
+    }
   }
 }

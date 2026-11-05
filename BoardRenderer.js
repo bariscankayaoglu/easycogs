@@ -135,14 +135,23 @@ class BoardRenderer {
 
       if (cog.icon.type === "blank") {
         div.style.backgroundImage = "";
+        div.classList.remove("cogtext");
         div.innerHTML = "";
+      } else if (cog.icon.text) {
+        // Text-only cog (e.g. crystal "C1", mini "SMA") with no art yet.
+        div.style.backgroundImage = "";
+        div.style.removeProperty("background-size");
+        div.classList.add("cogtext");
+        div.innerText = cog.icon.text;
       } else if (cog.isPlayer) {
         div.style.backgroundImage = `url("${cog.icon.path}")`;
         div.style["background-size"] = `contain`;
+        div.classList.remove("cogtext");
         div.innerHTML = "";
       }	else {
         div.style.removeProperty("background-size");
         div.style.backgroundImage = `url("${cog.icon.path}")`;
+        div.classList.remove("cogtext");
         div.innerHTML = "";
       }
 

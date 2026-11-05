@@ -312,6 +312,24 @@ table.cogboard tr > td > .coglabel {
     z-index: 3;
 }
 
+/* Text-only cog icon (crystal "C1".. / mini "SMA" etc.) shown until real art
+   is wired up. Centered in the slot. */
+table.cogboard tr > td > div.cogtext {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'PressStart';
+    font-size: 11px;
+    line-height: 1;
+    color: #ffffff;
+    text-align: center;
+    text-shadow: 1px 1px 0 black,
+                 1px -1px 0 black,
+                 -1px -1px 0 black,
+                 -1px 1px 0 black;
+    pointer-events: none;
+}
+
 .toMove:after {
     position: absolute;
     content: '';

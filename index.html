@@ -14,7 +14,7 @@
     <script type="text/javascript" src="PlayerRenderer.js"></script>
     <script type="text/javascript" src="Paginator.js"></script>
     
-    <title>Cogtimizer</title>
+    <title>Easy Cogs</title>
   </head>
   <body>
     <div class="menucontainer">
@@ -229,7 +229,7 @@
           }
         }
       }
-      
+
       function yield() {
         return new Promise(r=>setTimeout(r,1));
       }
@@ -545,13 +545,32 @@
         }
       }
 
+      // Idleon's number notation ladder: a new suffix every 3 orders of
+      // magnitude (K, M, B, T, Q, QQ, ...). Earlier this only knew K and M, so
+      // anything >= 1e9 rendered as a giant "...M" string. Values can reach
+      // 1e19+ (player cogs), so we need the full ladder with a scientific
+      // fallback for magnitudes beyond the named suffixes.
+      const MMO_SUFFIXES = ["", "K", "M", "B", "T", "Q", "QQ", "QiQ", "SxQ", "SpQ", "OcQ", "NoQ", "Dc"];
       function mmoifyNumber(num, addSign = true) {
-        let str = num;
+        let str;
+        const neg = num < 0;
+        const abs = Math.abs(num);
 
-        if (Math.abs(num) >= 1000000) {
-          str = (Math.ceil(num / 10000) / 100) + "M";
-        } else if (Math.abs(num) >= 1000) {
-          str = (Math.ceil(num / 10) / 100) + "K";
+        if (abs < 1000) {
+          // Small values: show as-is (trim pointless decimals).
+          str = (Math.round(num * 100) / 100).toString();
+        } else {
+          const tier = Math.floor(Math.log10(abs) / 3);
+          const suffix = MMO_SUFFIXES[tier];
+          if (suffix !== undefined) {
+            const scaled = abs / Math.pow(1000, tier);
+            // 2 decimals, dropping trailing zeros (e.g. 32.60 -> 32.6, 5.00 -> 5).
+            let shown = (Math.floor(scaled * 100) / 100).toString();
+            str = (neg ? "-" : "") + shown + suffix;
+          } else {
+            // Beyond the named ladder: fall back to scientific notation.
+            str = num.toExponential(2);
+          }
         }
 
         if (addSign && num >= 0) {
